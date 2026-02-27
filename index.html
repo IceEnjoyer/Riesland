@@ -104,7 +104,7 @@
         const timeSystem = {
             startRealTime: Date.now(),
             startSimulatedTime: 8 * 60 * 60 * 1000, // 08:00 AM in Millisekunden
-            speed: 60, // 60x real-time
+            speed: 30, // 60x real-time
             
             getCurrentSimulatedTime() {
                 const realElapsed = Date.now() - this.startRealTime;
@@ -142,7 +142,6 @@
         // ==================== Orte in Brandenburg ====================
         const locations = [
             { name: 'Potsdam', coords: [52.4000, 13.0667] },
-            { name: 'Berlin-Charlottenburg', coords: [52.5167, 13.2833] },
             { name: 'Brandenburg a.d. Havel', coords: [52.4167, 12.5500] },
             { name: 'Frankfurt (Oder)', coords: [52.3472, 14.5506] },
             { name: 'Eisenhüttenstadt', coords: [52.1500, 14.6667] },
@@ -178,9 +177,9 @@
 
         // ==================== Fahrzeug-Daten ====================
         const vehicles = [
-            { id: 1, name: 'Fahrzeug A - Nord', color: '#667eea' },
-            { id: 2, name: 'Fahrzeug B - Mitte', color: '#764ba2' },
-            { id: 3, name: 'Fahrzeug C - Süd', color: '#f093fb' }
+            { id: 1, name: 'Fahrzeug 1', color: '#667eea' },
+            { id: 2, name: 'Fahrzeug 2', color: '#764ba2' },
+            { id: 3, name: 'Fahrzeug 3', color: '#f093fb' }
         ];
 
         let map;
