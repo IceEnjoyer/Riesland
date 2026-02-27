@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fahrende Apotheke Brandenburg</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="style.css" />
+    <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
+</head>
+<body>
+    <!-- App Header -->
+    <header class="app-header">
+        <div class="app-header-content">
+            <div class="app-title">
+                <span class="app-icon">🚑</span>
+                <h1>Fahrende Apotheke</h1>
+            </div>
+            <div class="app-time">⏰ <span id="simulatedTime">08:00</span> <span class="time-speed">60x</span></div>
+            <button class="theme-toggle" id="themeToggle" title="Dark Mode">🌙</button>
+        </div>
+    </header>
+
+    <!-- Main Map Container -->
+    <main class="app-container">
+        <div class="map-wrapper">
+            <div id="map"></div>
+            <div class="map-overlay" id="mapOverlay">
+                <button class="vehicle-info-button" id="vehicleInfoBtn" style="display: none;">
+                    <span id="vehicleInfoName">Fahrzeug A</span>
+                    <span id="vehicleInfoNext">→ Potsdam</span>
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <!-- Vehicle Info Modal -->
+    <div class="modal" id="vehicleModal">
+        <div class="modal-content modal-vehicle">
+            <div class="modal-close" onclick="closeVehicleModal()">✕</div>
+            <div class="modal-header" id="vehicleModalHeader">Fahrzeug Details</div>
+            
+            <div class="vehicle-detail-info">
+                <div class="detail-row">
+                    <span class="detail-label">Aktueller Ort:</span>
+                    <span class="detail-value" id="detailLocation">-</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Nächster Ort:</span>
+                    <span class="detail-value" id="detailNextLocation">-</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Status:</span>
+                    <span class="detail-value" id="detailStatus">-</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Standzeit:</span>
+                    <span class="detail-value" id="detailStandTime">-</span>
+                </div>
+            </div>
+
+            <div class="modal-divider"></div>
+
+            <div class="modal-header modal-header-sm">💊 Verfügbare Medikamente</div>
+            <div id="medicinesList" class="medicines-grid"></div>
+
+            <div class="modal-actions">
+                <button class="btn btn-primary btn-block" onclick="orderVehicle()">📱 Fahrzeug Bestellen</button>
+                <button class="btn btn-secondary btn-block" onclick="orderMedicines()">💊 Medikament Bestellen</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Medicines Modal -->
+    <div class="modal" id="medicinesModal">
+        <div class="modal-content">
+            <div class="modal-close" onclick="closeMedicinesModal()">✕</div>
+            <div class="modal-header">Medikament bestellt ✓</div>
+            <p style="text-align: center; color: var(--color-text-secondary); margin: var(--spacing-lg) 0;">
+                Dein Medikament wird beim nächsten Besuch in deinem Ort im Fahrzeug bereitgestellt.
+            </p>
+            <button class="btn btn-primary btn-block" onclick="closeMedicinesModal()">OK</button>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // ==================== Dark Mode Toggle ====================
+        const themeToggle = document.getElementById('themeToggle');
+        const isDarkMode = localStorage.getItem('darkMode') === 'true';
+        if (isDarkMode) {
+            document.body.classList.add('dark-mode');
+            themeToggle.textContent = '☀️';
+        }
+
+        themeToggle.addEventListener('click', () => {
+            document.body.classList.toggle('dark-mode');
+            const darkMode = document.body.classList.contains('dark-mode');
+            localStorage.setItem('darkMode', darkMode);
+            themeToggle.textContent = darkMode ? '☀️' : '🌙';
+        });
+
+        // ==================== Simuliertes Zeit-System ====================
+        const timeSystem = {
+            startRealTime: Date.now(),
+            startSimulatedTime: 8 * 60 * 60 * 1000, // 08:00 AM in Millisekunden
+            speed: 60, // 60x real-time
+            
+            getCurrentSimulatedTime() {
+                const realElapsed = Date.now() - this.startRealTime;
+                const simElapsed = realElapsed * this.speed;
+                return this.startSimulatedTime + simElapsed;
+            },
+            
+            getFormattedTime() {
+                const ms = this.getCurrentSimulatedTime();
+                const totalSeconds = Math.floor((ms / 1000) % 86400); // Modulo für 24h cycle
+                const hours = Math.floor(totalSeconds / 3600);
+                const minutes = Math.floor((totalSeconds % 3600) / 60);
+                const seconds = totalSeconds % 60;
+                
+                const pad = (n) => String(n).padStart(2, '0');
+                return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+            }
+        };
+
+        // ==================== Medikamenten-Datenbank ====================
+        const medicinesDatabase = [
+            'Aspirin', 'Ibuprofen', 'Paracetamol', 'Acetaminophen', 'Diclofenac',
+            'Naproxen', 'Metamizol', 'Kodein', 'Tramadol', 'Morphin',
+            'Halstabletten', 'Hustensirup', 'Schmerzsalbe', 'Augentropfen', 'Verbandsmaterial',
+            'Desinfektionsmittel', 'Pflaster', 'Mullbinden', 'Zahnpasta', 'Wundsalbe',
+            'Antihistamin', 'Magensäurehemmer', 'Hustensaft', 'Nasentropfen', 'Creme',
+            'Antibiotika', 'Vitamin C', 'Vitamin D', 'Vitamin B12', 'Kalzium',
+            'Magnesium', 'Eisentabletten', 'Zinkpastillen', 'Grippemedizin', 'Fiebersaft',
+            'Allergie Spray', 'Blasenpflaster', 'Blutdruck Messgerät', 'Fieberthermometer', 'Blutdruckmessband',
+            'Elektrolyte', 'Abführmittel', 'Antidiarrhöikum', 'Antazida', 'H2-Blocker',
+            'Salbe gegen Insektenstiche', 'Sonnencreme', 'Arnika', 'Leukoplast', 'Schlafmittel',
+            'Kopfschmerztabletten', 'Migränespray', 'Schwangerschaftstest', 'Bluttest Streifen', 'Insulin'
+        ];
+
+        // ==================== Orte in Brandenburg ====================
+        const locations = [
+            { name: 'Potsdam', coords: [52.4000, 13.0667] },
+            { name: 'Berlin-Charlottenburg', coords: [52.5167, 13.2833] },
+            { name: 'Brandenburg a.d. Havel', coords: [52.4167, 12.5500] },
+            { name: 'Frankfurt (Oder)', coords: [52.3472, 14.5506] },
+            { name: 'Eisenhüttenstadt', coords: [52.1500, 14.6667] },
+            { name: 'Seelow', coords: [52.5333, 14.3833] },
+            { name: 'Straussberg', coords: [52.5833, 13.8833] },
+            { name: 'Fürstenwalde', coords: [52.3667, 13.7333] },
+            { name: 'Eberswalde', coords: [52.8333, 13.8167] },
+            { name: 'Angermünde', coords: [53.0167, 13.9833] },
+            { name: 'Zehdenick', coords: [52.9833, 13.3333] },
+            { name: 'Gransee', coords: [53.0000, 13.1667] },
+            { name: 'Templin', coords: [53.1167, 13.5000] },
+            { name: 'Lychen', coords: [53.2167, 13.3167] },
+            { name: 'Prenzlau', coords: [53.3167, 13.8667] },
+            { name: 'Neuruppin', coords: [52.9333, 12.8000] },
+            { name: 'Wittstock/Dosse', coords: [53.1667, 12.4833] },
+            { name: 'Perleberg', coords: [53.0667, 11.8667] },
+            { name: 'Bad Wilsnack', coords: [52.9667, 11.9500] },
+            { name: 'Oranienburg', coords: [52.7500, 13.2333] },
+            { name: 'Schwedt/Oder', coords: [53.0667, 14.2833] },
+            { name: 'Erkner', coords: [52.4167, 13.7500] },
+            { name: 'Beeskow', coords: [52.1667, 14.2500] },
+            { name: 'Bad Saarow', coords: [52.2833, 14.0667] },
+            { name: 'Cottbus', coords: [51.7667, 14.3333] },
+            { name: 'Senftenberg', coords: [51.5167, 14.0000] },
+            { name: 'Finsterwalde', coords: [51.6333, 13.7167] },
+            { name: 'Lübben', coords: [51.9333, 13.9000] },
+            { name: 'Luckau', coords: [51.8500, 13.7167] },
+            { name: 'Königs Wusterhausen', coords: [52.3000, 13.6333] },
+            { name: 'Zossen', coords: [52.2167, 13.4500] },
+            { name: 'Teltow', coords: [52.4000, 13.2667] },
+            { name: 'Luckenwalde', coords: [52.0833, 13.1667] }
+        ];
+
+        // ==================== Fahrzeug-Daten ====================
+        const vehicles = [
+            { id: 1, name: 'Fahrzeug A - Nord', color: '#667eea' },
+            { id: 2, name: 'Fahrzeug B - Mitte', color: '#764ba2' },
+            { id: 3, name: 'Fahrzeug C - Süd', color: '#f093fb' }
+        ];
+
+        let map;
+        let markers = {};
+        let selectedVehicle = null;
+        let vehicleStates = {};
+
+        // ==================== Hilfsfunktionen ====================
+        function generateRandomMedicines() {
+            const medicines = [];
+            const count = Math.floor(Math.random() * 4) + 4;
+            for (let i = 0; i < count; i++) {
+                const medicine = medicinesDatabase[Math.floor(Math.random() * medicinesDatabase.length)];
+                if (!medicines.find(m => m.name === medicine)) {
+                    medicines.push({
+                        name: medicine,
+                        quantity: Math.floor(Math.random() * 20) + 5
+                    });
+                }
+            }
+            return medicines;
+        }
+
+        function getDistance(coord1, coord2) {
+            const R = 6371;
+            const dLat = (coord2[0] - coord1[0]) * Math.PI / 180;
+            const dLng = (coord2[1] - coord1[1]) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(coord1[0] * Math.PI / 180) * Math.cos(coord2[0] * Math.PI / 180) *
+                      Math.sin(dLng/2) * Math.sin(dLng/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            const directDistance = R * c;
+            // Straßen sind länger als Luftlinien (ca. 1.25x durch Kurven und Umwege)
+            return directDistance * 1.25;
+        }
+
+        function getInterpolatedPosition(from, to, progress) {
+            if (progress >= 1) return to;
+            return [
+                from[0] + (to[0] - from[0]) * progress,
+                from[1] + (to[1] - from[1]) * progress
+            ];
+        }
+
+        // ==================== Fahrzeug-Initialisierung ====================
+        function initVehicleStates() {
+            vehicles.forEach(vehicle => {
+                const startLocation = locations[Math.floor(Math.random() * locations.length)];
+                const startIndex = locations.indexOf(startLocation);
+                const nextIndex = selectNearestNextLocation(startIndex, vehicle.id);
+                const distance = getDistance(locations[startIndex].coords, locations[nextIndex].coords);
+                const travelDuration = calculateTravelDuration(distance);
+
+                vehicleStates[vehicle.id] = {
+                    vehicle: vehicle,
+                    currentLocationIndex: startIndex,
+                    nextLocationIndex: nextIndex,
+                    medicines: generateRandomMedicines(),
+                    isMoving: false,
+                    moveStartTime: null,
+                    travelDuration: travelDuration,
+                    standStartTime: timeSystem.getCurrentSimulatedTime(),
+                    standDuration: (Math.floor(Math.random() * 30) + 30) * 60 * 1000, // 30-60 Minuten
+                    routeLatLngs: null
+                };
+            });
+        }
+
+        // Berechne realistische Fahrtdauer basierend auf Distanz (80 km/h, 60x Speed)
+        // WICHTIG: Diese Dauer ist in SIMULIERTER Zeit (nicht in echten Millisekunden!)
+        function calculateTravelDuration(distanceKm) {
+            // Reale Fahrtzeit: distanceKm / 80 km/h = Stunden
+            // Simulierte Sekunden: (distanceKm / 80) * 3600
+            // Simulierte Millisekunden: (distanceKm / 80) * 3600 * 1000 = distanceKm * 45000 ms
+            return Math.max(distanceKm * 45000, 600000); // Minimum 10 Minuten simulierte Zeit
+        }
+
+        // Wähle nächste Location basierend auf Nähe (verhindert auch Doppelbelegung)
+        function selectNearestNextLocation(currentIndex, vehicleId) {
+            const currentCoords = locations[currentIndex].coords;
+            
+            // Finde 5 nächste Orte
+            const distances = locations.map((loc, idx) => ({
+                index: idx,
+                distance: getDistance(currentCoords, loc.coords)
+            }))
+            .filter(item => item.index !== currentIndex) // Nicht der aktuelle Ort
+            .filter(item => item.distance > 5) // Mindestens 5km entfernt
+            .sort((a, b) => a.distance - b.distance)
+            .slice(0, 5); // Top 5
+
+            if (distances.length === 0) {
+                return Math.floor(Math.random() * locations.length);
+            }
+
+            // Wähle zufällig einen der 5 nächsten, aber verhindere Doppelbelegung
+            let selectedIndex = distances[0].index;
+            let attempts = 0;
+            
+            while (attempts < 10 && isLocationOccupied(selectedIndex, vehicleId)) {
+                const randomNearby = distances[Math.floor(Math.random() * distances.length)];
+                selectedIndex = randomNearby.index;
+                attempts++;
+            }
+
+            return selectedIndex;
+        }
+
+        // Checkt ob ein Ort gerade von einem anderen Fahrzeug belegt ist
+        function isLocationOccupied(locationIndex, excludeVehicleId) {
+            for (const vehicleId in vehicleStates) {
+                if (vehicleId == excludeVehicleId) continue;
+                const state = vehicleStates[vehicleId];
+                if (state.currentLocationIndex === locationIndex && !state.isMoving) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function getVehicleCurrentLocation(vehicleId) {
+            const state = vehicleStates[vehicleId];
+            return locations[state.currentLocationIndex];
+        }
+
+        function getVehicleNextLocation(vehicleId) {
+            const state = vehicleStates[vehicleId];
+            return locations[state.nextLocationIndex];
+        }
+
+        // ==================== Karten-Initialisierung ====================
+        function initMap() {
+            map = L.map('map').setView([52.5, 13.4], 8);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 15
+            }).addTo(map);
+        }
+
+        // ==================== Marker erstellen ====================
+        function createVehicleMarker(vehicleId) {
+            const state = vehicleStates[vehicleId];
+            const location = getVehicleCurrentLocation(vehicleId);
+
+            const customIcon = L.divIcon({
+                html: `<div style="width: 45px; height: 45px; background: linear-gradient(135deg, ${state.vehicle.color} 0%, ${state.vehicle.color}dd 100%); border: 3px solid white; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.25); cursor: pointer;">🚑</div>`,
+                iconSize: [45, 45],
+                iconAnchor: [22.5, 22.5],
+                popupAnchor: [0, -15]
+            });
+
+            const marker = L.marker(location.coords, { icon: customIcon })
+                .addTo(map)
+                .on('click', () => {
+                    selectVehicle(vehicleId);
+                });
+
+            markers[vehicleId] = marker;
+        }
+
+        // ==================== UI Update ====================
+        function updateVehicleMarker(vehicleId) {
+            if (!markers[vehicleId]) {
+                createVehicleMarker(vehicleId);
+            }
+            
+            const state = vehicleStates[vehicleId];
+            const currentLoc = getVehicleCurrentLocation(vehicleId);
+            const nextLoc = getVehicleNextLocation(vehicleId);
+            const now = timeSystem.getCurrentSimulatedTime();
+
+            if (state.isMoving && state.moveStartTime !== null) {
+                const elapsed = now - state.moveStartTime;
+                const progress = Math.min(elapsed / state.travelDuration, 1);
+
+                let newCoords;
+                if (state.routeLatLngs && state.routeLatLngs.length > 0) {
+                    // Interpolate along route
+                    let totalDistance = 0;
+                    for (let i = 1; i < state.routeLatLngs.length; i++) {
+                        totalDistance += getDistance(state.routeLatLngs[i-1], state.routeLatLngs[i]);
+                    }
+                    const targetDistance = progress * totalDistance;
+                    let currentDistance = 0;
+                    newCoords = state.routeLatLngs[0];
+                    for (let i = 1; i < state.routeLatLngs.length; i++) {
+                        const segmentDistance = getDistance(state.routeLatLngs[i-1], state.routeLatLngs[i]);
+                        if (currentDistance + segmentDistance >= targetDistance) {
+                            const segmentProgress = (targetDistance - currentDistance) / segmentDistance;
+                            newCoords = getInterpolatedPosition(state.routeLatLngs[i-1], state.routeLatLngs[i], segmentProgress);
+                            break;
+                        }
+                        currentDistance += segmentDistance;
+                        if (i === state.routeLatLngs.length - 1) {
+                            newCoords = state.routeLatLngs[i];
+                        }
+                    }
+                } else {
+                    newCoords = getInterpolatedPosition(currentLoc.coords, nextLoc.coords, progress);
+                }
+                markers[vehicleId].setLatLng(newCoords);
+
+                // Angekommen?
+                if (progress >= 1) {
+                    state.isMoving = false;
+                    state.currentLocationIndex = state.nextLocationIndex;
+                    state.moveStartTime = null;
+                    
+                    // Wähle ERST neuen nächsten Ort, DANN berechne Distanz
+                    state.nextLocationIndex = selectNearestNextLocation(state.currentLocationIndex, vehicleId);
+                    const newDistance = getDistance(
+                        locations[state.currentLocationIndex].coords,
+                        locations[state.nextLocationIndex].coords
+                    );
+                    state.travelDuration = calculateTravelDuration(newDistance);
+                    
+                    state.medicines = generateRandomMedicines();
+                    state.standDuration = (Math.floor(Math.random() * 30) + 30) * 60 * 1000; // 30-60 Minuten
+                    state.standStartTime = now;
+                    state.routeLatLngs = null; // Reset route
+                }
+            }
+
+            // Calculate route if moving and no route yet
+            if (state.isMoving && !state.routeLatLngs && L.Routing && L.Routing.osrmv1) {
+                var router = L.Routing.osrmv1();
+                router.route([L.latLng(currentLoc.coords[0], currentLoc.coords[1]), L.latLng(nextLoc.coords[0], nextLoc.coords[1])], function(err, routes) {
+                    if (!err && routes.length > 0) {
+                        state.routeLatLngs = routes[0].coordinates.map(ll => [ll.lat, ll.lng]);
+                    }
+                });
+            }
+
+            // Starten wir das nächste Fahren?
+            if (!state.isMoving && state.standStartTime !== null) {
+                const standElapsed = now - state.standStartTime;
+                if (standElapsed >= state.standDuration) {
+                    state.isMoving = true;
+                    state.moveStartTime = now;
+                    state.standStartTime = null;
+                }
+            }
+        }
+
+        function updateSelectedVehicleInfo() {
+            if (!selectedVehicle) return;
+
+            const state = vehicleStates[selectedVehicle];
+            const currentLoc = getVehicleCurrentLocation(selectedVehicle);
+            const nextLoc = getVehicleNextLocation(selectedVehicle);
+            const now = timeSystem.getCurrentSimulatedTime();
+            
+            // Berechne verbleibende Zeit
+            let statusText = '---';
+            let timeDisplay = '---';
+            
+            if (state.isMoving && state.moveStartTime !== null) {
+                const elapsed = now - state.moveStartTime;
+                const remaining = Math.max(0, state.travelDuration - elapsed);
+                const remainingSeconds = Math.ceil(remaining / 1000);
+                const remainingMinutes = Math.ceil(remaining / (60 * 1000));
+                
+                // Berechne tatsächliche Fahrtzeit
+                const distance = getDistance(currentLoc.coords, nextLoc.coords);
+                const realMinutes = Math.ceil((distance / 80) * 60); // 80 km/h
+                
+                statusText = `🚗 Fahrt - ETA ${remainingMinutes} min`;
+                timeDisplay = `${distance.toFixed(1)} km (${realMinutes} min)`;
+            } else if (!state.isMoving && state.standStartTime !== null) {
+                const standElapsed = now - state.standStartTime;
+                const remaining = Math.max(0, state.standDuration - standElapsed);
+                const remainingMinutes = Math.ceil(remaining / (60 * 1000));
+                statusText = `✓ Halt - ${remainingMinutes} min`;
+                timeDisplay = `${remainingMinutes} min Standzeit`;
+            }
+
+            document.getElementById('vehicleModalHeader').textContent = state.vehicle.name;
+            document.getElementById('detailLocation').textContent = state.isMoving ? `Unterwegs zu ${nextLoc.name}` : currentLoc.name;
+            document.getElementById('detailNextLocation').textContent = nextLoc.name;
+            document.getElementById('detailStatus').textContent = statusText;
+            document.getElementById('detailStandTime').textContent = timeDisplay;
+
+            document.getElementById('vehicleInfoName').textContent = state.vehicle.name;
+            document.getElementById('vehicleInfoNext').textContent = `→ ${nextLoc.name}`;
+        }
+
+        // ==================== User Interactions ====================
+        function selectVehicle(vehicleId) {
+            selectedVehicle = vehicleId;
+            const state = vehicleStates[vehicleId];
+            const currentLoc = getVehicleCurrentLocation(vehicleId);
+            
+            map.setView(currentLoc.coords, 11);
+            updateSelectedVehicleInfo();
+
+            document.getElementById('vehicleInfoBtn').style.display = 'flex';
+            document.getElementById('vehicleModal').classList.add('active');
+        }
+
+        function closeVehicleModal() {
+            document.getElementById('vehicleModal').classList.remove('active');
+            selectedVehicle = null;
+            document.getElementById('vehicleInfoBtn').style.display = 'none';
+        }
+
+        function closeMedicinesModal() {
+            document.getElementById('medicinesModal').classList.remove('active');
+        }
+
+        function orderVehicle() {
+            if (!selectedVehicle) return;
+            const state = vehicleStates[selectedVehicle];
+            const nextLoc = getVehicleNextLocation(selectedVehicle);
+            const currentTime = timeSystem.getFormattedTime();
+            const distance = getDistance(
+                getVehicleCurrentLocation(selectedVehicle).coords,
+                nextLoc.coords
+            );
+            const eta = Math.ceil((distance / 80) * 60); // 80 km/h
+            
+            alert(`✓ ${state.vehicle.name} wurde bestellt!\n\n🕐 Bestellzeit: ${currentTime}\nNächster Ort: ${nextLoc.name}\nDistanz: ${distance.toFixed(1)} km\nETA: ca. ${eta} Minuten (80 km/h)`);
+        }
+
+        function orderMedicines() {
+            const state = vehicleStates[selectedVehicle];
+            const medicinesList = document.getElementById('medicinesList');
+            
+            medicinesList.innerHTML = state.medicines.map(medicine => `
+                <div class="medicine-item">
+                    <div class="medicine-name">${medicine.name}</div>
+                    <div class="medicine-qty">${medicine.quantity} Stück</div>
+                </div>
+            `).join('');
+
+            document.getElementById('medicinesModal').classList.add('active');
+        }
+
+        // ==================== Main Animation Loop ====================
+        function animate() {
+            // Update Zeit-Anzeige
+            document.getElementById('simulatedTime').textContent = timeSystem.getFormattedTime();
+
+            vehicles.forEach(vehicle => {
+                updateVehicleMarker(vehicle.id);
+            });
+
+            if (selectedVehicle) {
+                updateSelectedVehicleInfo();
+            }
+
+            requestAnimationFrame(animate);
+        }
+
+        // ==================== Initialization ====================
+        window.addEventListener('load', () => {
+            initMap();
+            initVehicleStates();
+            vehicles.forEach(vehicle => createVehicleMarker(vehicle.id));
+            animate();
+        });
+
+        // Close modal on background click
+        document.getElementById('vehicleModal').addEventListener('click', (e) => {
+            if (e.target.id === 'vehicleModal') {
+                closeVehicleModal();
+            }
+        });
+
+        document.getElementById('medicinesModal').addEventListener('click', (e) => {
+            if (e.target.id === 'medicinesModal') {
+                closeMedicinesModal();
+            }
+        });
+    </script>
+</body>
+</html>
